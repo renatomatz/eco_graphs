@@ -161,7 +161,7 @@ class EcoGraph:
     _fig: plt.Figure
     _ax: Dict[str, namedtuple]  # of axis
 
-    _undefined: Set[str]
+    _undefined_params: Set[str]
     _var_params: Dict[str, namedtuple]  # of interactive_param
     _static_params: Dict[str, str]
 
@@ -178,7 +178,7 @@ class EcoGraph:
         self._fig = None
         self._ax = None
 
-        self._undefined = set()
+        self._undefined_params = set()
         self._var_params = dict()
         self._static_params = dict()
 
@@ -290,32 +290,37 @@ class EcoGraph:
 
     @property
     def undefined_params(self):
-        return frozenset(self._undefined)
+        return frozenset(self._undefined_params)
 
-    def define_var_param(self, param, value, kind=None):
+    def define_var_param(self, param, value, kind=None, default=None):
 
-        if param in self.undefined_params:
-            self._undefined.remove(param)
-        elif param in self.static_params:
-            del self._static_defaults[param]
-        elif param not in self.var_params:
+        if param in self._undefined_params:
+            self._undefined_params.remove(param)
+        elif param in self._static_params:
+            del self._static_params[param]
+        elif param not in self._var_params:
             raise ValueError(f"parameter {param} is not part of any \
                 defined graph")
 
-        self._var_params[param] = EcoGraph.interactive_param(
+        interactive = EcoGraph.interactive_param(
             orig=value,
             widget=EcoGraph.process_interactive(value, kind=kind)
         )
+
+        interactive.widget.value = default if default is not None \
+            else interactive.widget.value
+
+        self._var_params[param] = interactive
 
         return self
 
     def define_static_param(self, param, value):
 
-        if param in self.undefined_params:
-            self._undefined.remove(param)
-        elif param in self.var_params:
+        if param in self._undefined_params:
+            self._undefined_params.remove(param)
+        elif param in self._var_params:
             del self._var_params[param]
-        elif param not in self.static_params:
+        elif param not in self._static_params:
             raise ValueError(f"parameter {param} is not part of any \
                 defined graph")
 
@@ -358,7 +363,7 @@ class EcoGraph:
         name = name if name is not None else f"Graph {EcoGraph.total_graphs}"
 
         # there can only be one graph in an EcoGraph object at once
-        self._undefined = set(graph_maker.params)
+        self._undefined_params = set(graph_maker.params)
 
         self._fig, _ax = plt.subplots(1)
         self._ax = {name: EcoGraph.axis(axis=_ax, maker=graph_maker)}
@@ -366,6 +371,11 @@ class EcoGraph:
     def __call__(self, **kwargs):
         """
         """
+
+        if len(self._undefined_params) > 0:
+            raise RuntimeError(f"All parameters must be defined as static \
+                or variable before calling. Please define the following \
+                parameters: {self._undefined_params}")
 
         # this is a mechanic required by ipywidgets
         def plot_axes(**all_params):
@@ -487,7 +497,7 @@ class MultiGraph(EcoGraph):
 
         self._ax[name] = ax
 
-        self._undefined.update(set(graph_maker.params))
+        self._undefined_params.update(set(graph_maker.params))
 
         return self
 
@@ -501,51 +511,3 @@ class MultiGraph(EcoGraph):
     def switch_graph_coord(self, coord1, coord2):
         self._ax_by_coord[coord1], self._ax_by_coord[coord2] = \
             self._ax_by_coord[coord2], self._ax_by_coord[coord1]
-
-
-if __name__ == "__main__":
-
-    def utility(x, U, e1, e2):
-        return (U/(x**e1))**(1/e2)
-
-    def budget(x, I, p1, p2):
-        return (I - x*p1)/p2 
-
-    consumption_graph = GraphMaker(
-        name="Model of Consumer Consumption",
-        xlims=(0, 20),
-        ylims=(0, 20),
-    )
-
-    consumption_graph.xlabel = "price/utility of good x"
-    consumption_graph.ylabel = "price/utility of good y"
-
-    consumption_graph.define_line(
-        utility,
-        name="Utility"
-    )
-
-    consumption_graph.define_line(
-        budget,
-        name="Budget"
-    )
-
-    consumption_model = EcoGraph(
-        x_interval=(0, 15, 1)
-    )
-
-    consumption_model.define_graph(consumption_graph)
-
-    consumption_model.set_static_vals({
-        "e1": 1/2,
-        "e2": 1/2,
-        "p1": 1,
-        "p2": 1,
-    })
-
-    consumption_model.define_var_param("U", 4, "text")
-    consumption_model.define_var_param("I", 8, "slider")
-
-    consumption_model.set_figsize((8, 12))
-
-    consumption_model()
